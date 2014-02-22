@@ -19,9 +19,11 @@ class muncher {
 	 * @param args
 	 */
 	public static void main(String[] args) {
-		FILENAME = args[0];
+		//FILENAME = args[0];
+		//int lineNum = Integer.parseInt(args[1]);
+		int lineNum = 2;
 		DataBuffer data = new DataBuffer();
-		ReaderThread reader = new ReaderThread(data,FILENAME, 0);
+		ReaderThread reader = new ReaderThread(data,"input.txt", lineNum);
 
 	}
 
@@ -37,7 +39,7 @@ class ReaderThread extends Thread
 
 		try(Scanner file = new Scanner(new FileReader(new File(filename)));){
 			
-			for(int i = 0; i < lineNum; ++i)
+			for(int i = 1; i < lineNum; ++i)
 			{
 				file.nextLine();
 			}
