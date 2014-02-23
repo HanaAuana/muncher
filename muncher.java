@@ -1,11 +1,6 @@
-
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
-import java.io.InputStreamReader;
-
 import java.io.IOException;
-
 import java.util.Scanner;
 
 
@@ -15,16 +10,21 @@ class muncher {
 	static boolean RUN = true;
 
 	private static String FILENAME;
+	
+	static String READ_NAME = "Reader";
+	static String COUNT_NAME = "Counter";
+	static String NUMBER_NAME = "Numberer";
+	static String WRITE_NAME = "Writer";
 
 	/**
 	 * @param args
 	 */
 	public static void main(String[] args) {
-		//FILENAME = args[0];
-		DataBuffer data = new DataBuffer();
-		ReaderThread reader = new ReaderThread(data,"input.txt");
+		FILENAME = args[0];
+		DataBuffer data = new DataBuffer(4, READ_NAME, COUNT_NAME, NUMBER_NAME ,WRITE_NAME);
+		ReaderThread reader = new ReaderThread(data,FILENAME);
 		CounterThread counter = new CounterThread(data);
-		NumberThread number = new NumberThread(data,"input.txt");
+		NumberThread number = new NumberThread(data,FILENAME);
 		WriterThread writer = new WriterThread(data);
 
 
@@ -33,6 +33,11 @@ class muncher {
 		threads[1] = counter;
 		threads[2] = number;
 		threads[3] = writer;
+		
+		threads[0].setName("Reader"); //Start the threads
+		threads[1].setName("Counter");
+		threads[2].setName("Numberer");
+		threads[3].setName("Writer");
 
 		threads[0].start(); //Start the threads
 		threads[1].start();
@@ -160,34 +165,18 @@ class NumberThread extends Thread
 	public void run(){
 		while(muncher.RUN){
 			synchronized (this.data){
-				int countedLoc = data.hasCounted();
+				int[] countedArray = data.hasCounted();
+				int countedLoc = countedArray[0];
+				int countedLocCount = countedArray[1];
 				if(countedLoc != -1){ //If there's at least one counted String in the buffer
 					while(countedLoc != -1){
-						String toNumber;
-						if(data.getString(countedLoc).length() < 5){
-							toNumber = "";
-						}
-						else{
-							toNumber = data.getString(countedLoc).substring(0, data.getString(countedLoc).length()-5);
-						}
-						try(Scanner file = new Scanner(new FileReader(new File(filename)));){
-
-							int lineNum = 0;
-							while(file.hasNext()){
-								lineNum ++;
-								String toCheck = file.nextLine();
-								if(toNumber.equals(toCheck)){
-									String prefix = lineNum+": ";
-									data.setString(countedLoc, prefix.concat(data.getString(countedLoc)));
-									data.setStatus(countedLoc, DataBuffer.Status.NUMBERED);
-									data.notifyAll();
-								}
-							}
-						}
-						catch(IOException e){
-							e.printStackTrace();
-						}
-						countedLoc = data.hasCounted();
+						String prefix = countedLocCount+": ";
+						data.setString(countedLoc, prefix.concat(data.getString(countedLoc)));
+						data.setStatus(countedLoc, DataBuffer.Status.NUMBERED);
+						data.notifyAll();
+						countedArray = data.hasCounted();
+						countedLoc = countedArray[0];
+						countedLocCount = countedArray[1];
 					}
 				}
 				if(countedLoc == -1){
@@ -240,15 +229,31 @@ class WriterThread extends Thread
 class DataBuffer {
 	String[] data;
 	Status[] statusOf;
+	int[] accessCounts;
+	
+	String READ_NAME;
+	String COUNT_NAME;
+	String NUMBER_NAME;
+	String WRITE_NAME;
+	
 
 	enum Status {EMPTY, READ, COUNTED, NUMBERED}; //Enum type to keep track of the status of each string in the buffer
 
-	public DataBuffer() {
+	public DataBuffer(int numThreads, String rName, String cName, String nName, String wName) {
 		data = new String[8]; //Initialize arrays
 		statusOf = new Status[8];
 		for (int i = 0; i < statusOf.length; i++){ //Set status of each index to EMPTY
 			statusOf[i] = Status.EMPTY;
 		}
+		accessCounts = new int[numThreads];//Initalize an array to track the count of times a thread has accessed this buffer
+		for(int i = 0; i < accessCounts.length; i++){ //Set counts to start at 1
+			accessCounts[i] = 1;
+		}
+		
+		READ_NAME = rName;
+		COUNT_NAME = cName;
+		NUMBER_NAME = nName;
+		WRITE_NAME = wName;
 	}
 
 	public String getString(int which) {
@@ -257,8 +262,26 @@ class DataBuffer {
 	}
 
 	public void setString(int which, String newString) {
+		
+		incrementCount();
 
 		data[which] = newString;
+	}
+	
+	public void incrementCount(){
+		String curThread = Thread.currentThread().getName();
+		if(curThread.equals(READ_NAME)){
+			accessCounts[0]++;
+		}
+		else if(curThread.equals(COUNT_NAME)){
+			accessCounts[1]++;
+		}
+		else if(curThread.equals(NUMBER_NAME)){
+			accessCounts[2]++;
+		}
+		else if(curThread.equals(WRITE_NAME)){
+			accessCounts[3]++;
+		}
 	}
 
 	public Status getStatus(int which) {
@@ -289,16 +312,16 @@ class DataBuffer {
 		return -1;
 	}
 
-	public int hasCounted(){ //Returns -1 if no indices are ready for numbering, otherwise returns first ready index
+	public int[] hasCounted(){ //Returns -1 if no indices are ready for numbering, otherwise returns first ready index
 		for(int i = 0; i < statusOf.length; i++){
 			if (statusOf[i] == Status.COUNTED){
-				return i;
+				return new int[] {i, accessCounts[2] };
 			}
 		}
-		return -1;
+		return new int[] {-1, accessCounts[2] };
 	}
 
-	public boolean hasNumbered(){ //Returns -1 if no indices are ready for writing, otherwise returns first ready index
+	public boolean hasNumbered(){ //Returns true if an index is ready for writing, otherwise returns false
 		int lowest = -1;
 		for(int i = 0; i < statusOf.length; i++){
 			if (statusOf[i] == Status.NUMBERED){
@@ -308,7 +331,7 @@ class DataBuffer {
 		return false;
 	}
 
-	public int lowestNumbered(){ //Returns -1 if no indices are ready for writing, otherwise returns first ready index
+	public int lowestNumbered(){ //Returns -1 if no indices are ready for writing, otherwise returns the index of the String with the lowest line number
 		if(hasNumbered())
 		{
 			int lowestIndex = 0;
