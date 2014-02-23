@@ -9,7 +9,7 @@ import java.util.Scanner;
 
 class muncher {
 
-	static final boolean DEBUG = true;
+	static final boolean DEBUG = false;
 
 	private static String FILENAME;
 
@@ -39,13 +39,13 @@ class muncher {
 		threads[2].start();
 		threads[3].start();
 
-		for(int i = 0; i < threads.length; i++){ //Once we've created all our threads
-			try {
-				threads[i].join(); //Wait for them all to finish
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-		}
+		//		for(int i = 0; i < threads.length; i++){ //Once we've created all our threads
+		//			try {
+		//				threads[i].join(); //Wait for them all to finish
+		//			} catch (InterruptedException e) {
+		//				e.printStackTrace();
+		//			}
+		//		}
 
 
 	}
@@ -66,47 +66,56 @@ class ReaderThread extends Thread
 	}
 
 	public void run(){ //On run, simply execute a command as usual, but now wrapped in a thread
-
-		synchronized (this.data){
-			int emptyLoc = data.hasSpace();
-			if(emptyLoc != -1){ //If there's at least one empty spot in the buffer
-
-
-				while(emptyLoc != -1){
-					if(muncher.DEBUG){
-						System.out.println("Reading a string into: "+emptyLoc);
-					}
+		while(true){
+			synchronized (this.data){
+				int emptyLoc = data.hasSpace();
+				if(emptyLoc != -1){ //If there's at least one empty spot in the buffer
 
 
-					try(Scanner file = new Scanner(new FileReader(new File(filename)));){
-						if(file.hasNext()){
-							for(int i = 1; i < lineNum; ++i)
-							{
+					while(emptyLoc != -1){
+						if(muncher.DEBUG){
+							System.out.println("Reading a string into: "+emptyLoc);
+						}
 
-								file.nextLine();
-							}
+
+						try(Scanner file = new Scanner(new FileReader(new File(filename)));){
 							if(file.hasNext()){
-								data.setString(emptyLoc ,file.nextLine());
-								data.setStatus(emptyLoc, DataBuffer.Status.READ);
-								this.lineNum++;
-								data.notifyAll();
-							}
-							else{
-								break;
+								for(int i = 1; i < lineNum; ++i)
+								{
+
+									file.nextLine();
+								}
+								if(file.hasNext()){
+									data.setString(emptyLoc ,file.nextLine());
+									data.setStatus(emptyLoc, DataBuffer.Status.READ);
+									this.lineNum++;
+									data.notifyAll();
+								}
+								else{
+									break;
+								}
 							}
 						}
+						catch(IOException e){
+							e.printStackTrace();
+						}
+						emptyLoc = data.hasSpace();
 					}
-					catch(IOException e){
+				}
+				else{
+					if(muncher.DEBUG){
+						System.out.println("No strings to read");
+						//					for(int i = 0; i < 8; i ++){
+						//						System.out.println(data.getStatus(i));
+						//					}
+					}
+				}
+				if(emptyLoc == -1){
+					try {
+						data.wait();
+					} catch (InterruptedException e) {
 						e.printStackTrace();
 					}
-					emptyLoc = data.hasSpace();
-				}
-			}
-			if(emptyLoc == -1){
-				try {
-					data.wait();
-				} catch (InterruptedException e) {
-					e.printStackTrace();
 				}
 			}
 		}
@@ -125,31 +134,40 @@ class CounterThread extends Thread
 	}
 
 	public void run(){ //On run, simply execute a command as usual, but now wrapped in a thread
+		while(true){
+			synchronized (this.data){
+				int readyLoc = data.hasRead();
+				if(readyLoc != -1){ //If there's at least one read String in the buffer
 
-		synchronized (this.data){
-			int readyLoc = data.hasRead();
-			if(readyLoc != -1){ //If there's at least one read String in the buffer
+					while(readyLoc != -1){
+						if(muncher.DEBUG){
+							System.out.println("Counting string at: "+readyLoc);
+						}
 
-				while(readyLoc != -1){
-					if(muncher.DEBUG){
-						System.out.println("Counting string at: "+readyLoc);
+						String toCount = data.getString(readyLoc);
+						int charCount = toCount.length();
+
+						data.setString(readyLoc, toCount.concat(" ("+charCount+")"));
+						data.setStatus(readyLoc, DataBuffer.Status.COUNTED);
+						data.notifyAll();
+						readyLoc = data.hasRead();
 					}
 
-					String toCount = data.getString(readyLoc);
-					int charCount = toCount.length();
-
-					data.setString(readyLoc, toCount.concat(" ("+charCount+")"));
-					data.setStatus(readyLoc, DataBuffer.Status.COUNTED);
-					data.notifyAll();
-					readyLoc = data.hasRead();
 				}
-
-			}
-			if(readyLoc == -1){
-				try {
-					data.wait();
-				} catch (InterruptedException e) {
-					e.printStackTrace();
+				else{
+					if(muncher.DEBUG){
+						System.out.println("No strings to Count");
+						//					for(int i = 0; i < 8; i ++){
+						//						System.out.println(data.getStatus(i));
+						//					}
+					}
+				}
+				if(readyLoc == -1){
+					try {
+						data.wait();
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
 				}
 			}
 		}
@@ -169,62 +187,71 @@ class NumberThread extends Thread
 	}
 
 	public void run(){ //On run, simply execute a command as usual, but now wrapped in a thread
+		while(true){
+			synchronized (this.data){
+				int countedLoc = data.hasCounted();
 
-		synchronized (this.data){
-			int countedLoc = data.hasCounted();
 
+				if(countedLoc != -1){ //If there's at least one read String in the buffer
 
-			if(countedLoc != -1){ //If there's at least one read String in the buffer
+					while(countedLoc != -1){
+						if(muncher.DEBUG){
+							System.out.println("Numbering String at: "+countedLoc);
+						}
+						String toNumber;
+						if(data.getString(countedLoc).length() < 5){
+							toNumber = "";
+						}
+						else{
+							toNumber = data.getString(countedLoc).substring(0, data.getString(countedLoc).length()-5);
+						}
+						try(Scanner file = new Scanner(new FileReader(new File(filename)));){
 
-				while(countedLoc != -1){
-					if(muncher.DEBUG){
-						System.out.println("Numbering String at: "+countedLoc);
-					}
-					String toNumber;
-					if(data.getString(countedLoc).length() < 5){
-						toNumber = "";
-					}
-					else{
-						toNumber = data.getString(countedLoc).substring(0, data.getString(countedLoc).length()-5);
-					}
-					try(Scanner file = new Scanner(new FileReader(new File(filename)));){
-
-						int lineNum = 0;
-						while(file.hasNext()){
-							lineNum ++;
-							String toCheck = file.nextLine();
-							if(toNumber.equals(toCheck)){
-								String prefix = lineNum+": ";
-								data.setString(countedLoc, prefix.concat(data.getString(countedLoc)));
-								data.setStatus(countedLoc, DataBuffer.Status.NUMBERED);
-								data.notifyAll();
+							int lineNum = 0;
+							while(file.hasNext()){
+								lineNum ++;
+								String toCheck = file.nextLine();
+								if(toNumber.equals(toCheck)){
+									String prefix = lineNum+": ";
+									data.setString(countedLoc, prefix.concat(data.getString(countedLoc)));
+									data.setStatus(countedLoc, DataBuffer.Status.NUMBERED);
+									data.notifyAll();
+								}
 							}
 						}
+						catch(IOException e){
+							e.printStackTrace();
+						}
+						countedLoc = data.hasCounted();
 					}
-					catch(IOException e){
+
+				}
+				else{
+					if(muncher.DEBUG){
+						System.out.println("No strings to Number");
+						//					for(int i = 0; i < 8; i ++){
+						//						System.out.println(data.getStatus(i));
+						//					}
+					}
+				}
+				//			else{
+				//				if(muncher.DEBUG){
+				//					System.out.println("No string to number");
+				//					for(int i = 0; i < 8; i ++){
+				//						System.out.println(data.getString(i));
+				//					}
+				//					for(int i = 0; i < 8; i ++){
+				//						System.out.println(data.getStatus(i));
+				//					}
+				//				}
+				//
+				//			}
+				if(countedLoc == -1){
+					try {
+						data.wait();
+					} catch (InterruptedException e) {
 						e.printStackTrace();
 					}
-					countedLoc = data.hasCounted();
-				}
-
-			}
-			//			else{
-			//				if(muncher.DEBUG){
-			//					System.out.println("No string to number");
-			//					for(int i = 0; i < 8; i ++){
-			//						System.out.println(data.getString(i));
-			//					}
-			//					for(int i = 0; i < 8; i ++){
-			//						System.out.println(data.getStatus(i));
-			//					}
-			//				}
-			//
-			//			}
-			if(countedLoc == -1){
-				try {
-					data.wait();
-				} catch (InterruptedException e) {
-					e.printStackTrace();
 				}
 			}
 		}
@@ -244,35 +271,36 @@ class WriterThread extends Thread
 	}
 
 	public void run(){ //On run, simply execute a command as usual, but now wrapped in a thread
+		while(true){
+			synchronized (this.data){
+				int numberedLoc = data.hasNumbered();
+				if(numberedLoc != -1){ //If there's at least one read String in the buffer
+					while(numberedLoc != -1){
+						if(muncher.DEBUG){
+							System.out.println("Writing string at: "+numberedLoc);
+						}
+						String toWrite = data.getString(numberedLoc);
+						System.out.println(toWrite);
+						data.setStatus(numberedLoc, DataBuffer.Status.EMPTY);
+						data.notifyAll();
+						numberedLoc = data.hasNumbered();
+					}
 
-		synchronized (this.data){
-			int numberedLoc = data.hasNumbered();
-			if(numberedLoc != -1){ //If there's at least one read String in the buffer
-				while(numberedLoc != -1){
+				}
+				else{
 					if(muncher.DEBUG){
-						System.out.println("Writing string at: "+numberedLoc);
-					}
-					String toWrite = data.getString(numberedLoc);
-					System.out.println(toWrite);
-					data.setStatus(numberedLoc, DataBuffer.Status.EMPTY);
-					data.notifyAll();
-					numberedLoc = data.hasNumbered();
-				}
-
-			}
-			else{
-				if(muncher.DEBUG){
-					System.out.println("No strings to write");
-					for(int i = 0; i < 8; i ++){
-						System.out.println(data.getStatus(i));
+						System.out.println("No strings to write");
+						//					for(int i = 0; i < 8; i ++){
+						//						System.out.println(data.getStatus(i));
+						//					}
 					}
 				}
-			}
-			if(numberedLoc == -1){
-				try {
-					data.wait();
-				} catch (InterruptedException e) {
-					e.printStackTrace();
+				if(numberedLoc == -1){
+					try {
+						data.wait();
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
 				}
 			}
 		}
@@ -341,6 +369,7 @@ class DataBuffer {
 	}
 
 	public int hasNumbered(){ //Returns -1 if no indices are ready for writing, otherwise returns first ready index
+		int lowest = -1;
 		for(int i = 0; i < statusOf.length; i++){
 			if (statusOf[i] == Status.NUMBERED){
 				return i;
