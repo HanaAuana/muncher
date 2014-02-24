@@ -29,12 +29,25 @@ class muncher {
 	public static void main(String[] args) {
 		FILENAME = args[0]; //Gets file name from command line argument
 		
-		DataBuffer data = new DataBuffer(4, READ_NAME, COUNT_NAME, NUMBER_NAME ,WRITE_NAME);
+		int numLines = 0;
+		
+		try(Scanner file = new Scanner(new FileReader(new File(FILENAME)));){ //Open file
+			while(file.hasNext()){ //If there's another line to read
+					file.nextLine(); //Read line
+					numLines++; //Increment count of lines
+			}
+		}
+		catch(IOException e){
+			System.err.println("File Error, check file name");
+			System.exit(-1);
+		}
+		
+		DataBuffer data = new DataBuffer(4, numLines, READ_NAME, COUNT_NAME, NUMBER_NAME ,WRITE_NAME);
 		
 		ReaderThread reader = new ReaderThread(data,FILENAME); //Create threads, passing the
 		CounterThread counter = new CounterThread(data);       //shared DataBuffer
 		NumberThread number = new NumberThread(data);
-		WriterThread writer = new WriterThread(data);
+		WriterThread writer = new WriterThread(data, numLines);
 
 
 		Thread[] threads = new Thread[4]; //Set up an array for our threads
@@ -57,7 +70,7 @@ class muncher {
 			try {
 				threads[i].join(); //wait for them all to finish
 			} catch (InterruptedException e) {
-				e.printStackTrace();
+				System.err.println("Thread was interrupted");
 			}
 		}
 	}
@@ -92,8 +105,8 @@ class ReaderThread extends Thread { //Thread that reads a file line by line
 								}
 								
 								if(file.hasNext()){ //If there's still another line
-									
-									data.setString(emptyLoc ,file.nextLine()); //Store the next line
+									String nextLine = file.nextLine();
+									data.setString(emptyLoc ,nextLine); //Store the next line
 									data.setStatus(emptyLoc, DataBuffer.Status.READ); //Set status for that String to READ
 									this.lineNum++; //Increment line counter
 									data.notifyAll(); //Let other threads know we're done
@@ -104,7 +117,8 @@ class ReaderThread extends Thread { //Thread that reads a file line by line
 							}
 						}
 						catch(IOException e){
-							e.printStackTrace();
+							System.err.println("File error, check filename");
+							System.exit(-1);
 						}
 						emptyLoc = data.hasSpace(); //See if we have another empty slot
 					}
@@ -113,7 +127,7 @@ class ReaderThread extends Thread { //Thread that reads a file line by line
 					try {
 						data.wait(); //Release our lock and wait
 					} catch (InterruptedException e) {
-						e.printStackTrace();
+						System.err.println("Thread was interrupted");
 					}
 				}
 			}
@@ -151,7 +165,7 @@ class CounterThread extends Thread {
 					try {
 						data.wait(); //Release lock and wait
 					} catch (InterruptedException e) {
-						e.printStackTrace();
+						System.err.println("Thread was interrupted");
 					}
 				}
 			}
@@ -193,7 +207,7 @@ class NumberThread extends Thread {
 					try {
 						data.wait(); //Release our lock and wait
 					} catch (InterruptedException e) {
-						e.printStackTrace();
+						System.err.println("Thread was interrupted");
 					}
 				}
 			}
@@ -204,17 +218,20 @@ class NumberThread extends Thread {
 
 class WriterThread extends Thread { 
 	DataBuffer data;
+	
+	int numLines;
 
-	WriterThread(DataBuffer data){
+	WriterThread(DataBuffer data, int numLines){
 		this.data = data;
+		this.numLines = numLines;
 	}
 	public void run(){//Prints a string from the buffer
 		while(muncher.RUN){//Continuously loop to keep writing lines
 			synchronized (this.data){//Sync on shared buffer
 				
 				int numberedLoc = data.lowestNumbered();//Get the location of the lowest numbered string
+				
 				if(numberedLoc != -1){ //If there's a numbered String in the buffer
-					
 					while(numberedLoc != -1){//While there is a numbered string 
 						String toWrite = data.getString(numberedLoc); //Get the string from the buffer
 						System.out.println(toWrite); //Print the string
@@ -228,13 +245,17 @@ class WriterThread extends Thread {
 				}
 				if(numberedLoc == -1){//If there are no strings ready to write
 					try {
-						data.wait();//Release our lock and wait
+						if(data.getCount() < numLines){ //If we still need to write
+							data.wait();//Release our lock and wait
+						}	
 					} catch (InterruptedException e) {
-						e.printStackTrace();
+						System.err.println("Thread was interrupted");
 					}
 				}
 			}
+			
 		}
+		
 	}
 }
 
@@ -243,6 +264,8 @@ class DataBuffer {
 	Status[] statusOf;
 	int[] accessCounts;
 	
+	int numLines;
+	
 	String READ_NAME; //Declare strings to store thread names
 	String COUNT_NAME;
 	String NUMBER_NAME;
@@ -250,12 +273,14 @@ class DataBuffer {
 
 	enum Status {EMPTY, READ, COUNTED, NUMBERED}; //Enum type to keep track of the status of
 												  // each string in the buffer
-	public DataBuffer(int numThreads, String rName, String cName, String nName, String wName) {
+	public DataBuffer(int numThreads, int numLines, String rName, String cName, String nName, String wName) {
 		data = new String[8]; //Initialize arrays
 		statusOf = new Status[8];
 		for (int i = 0; i < statusOf.length; i++){ //Set status of each index to EMPTY
 			statusOf[i] = Status.EMPTY;
 		}
+		this.numLines = numLines;
+		
 		accessCounts = new int[numThreads];//Initalize an array to track the count of
 											// times a thread has accessed this buffer
 		for(int i = 0; i < accessCounts.length; i++){ //Set counts to start at 1
@@ -293,6 +318,30 @@ class DataBuffer {
 		}
 		else if(curThread.equals(WRITE_NAME)){
 			accessCounts[3]++;
+		}
+		
+		if(accessCounts[3] > numLines){
+			muncher.RUN = false;
+			
+		}
+	}
+	
+	public int getCount(){ // Return the counter for the current thread;
+		String curThread = Thread.currentThread().getName(); //Get the name of the current thread
+		if(curThread.equals(READ_NAME)){
+			return accessCounts[0];
+		}
+		else if(curThread.equals(COUNT_NAME)){
+			return accessCounts[1];
+		}
+		else if(curThread.equals(NUMBER_NAME)){
+			return accessCounts[2];
+		}
+		else if(curThread.equals(WRITE_NAME)){
+			return accessCounts[3];
+		}
+		else{
+			return -1;
 		}
 	}
 
@@ -355,13 +404,14 @@ class DataBuffer {
 					lowestIndex = i;//Set the marker to this index
 					lowestNum = Integer.parseInt(first.substring(0,first.indexOf(':'))); //Set the lowest number to this number
 
-					for(int j = 1; j < statusOf.length; j++){//Loop through the rest of the indices
+					for(int j = 0; j < statusOf.length; j++){//Loop through the rest of the indices
 						if (statusOf[j] == Status.NUMBERED){ //If this second string is NUMBERED and ready to write
 							
 							String second = getString(j); //Get the string at this index
 							int otherNum = Integer.parseInt(second.substring(0,second.indexOf(':'))); //Get the line number
 
 							if ( otherNum < lowestNum){ //If the line number for the second string is lower than the current lowest
+								
 								lowestIndex = j; //Set the lowest index to the current index
 								lowestNum = otherNum; //Set the lowest number to the current number
 							}
@@ -369,6 +419,7 @@ class DataBuffer {
 					}
 				}
 			}
+			//System.out.println("Lowest is "+lowestNum);
 			return lowestIndex; //Return the index of the string with the lowest line number
 		}
 		else{
